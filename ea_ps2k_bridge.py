@@ -28,6 +28,13 @@ Supported commands
   OUTP <ch>,<ON|OFF|1|0>
   CONF <ch>,<v>,<a>
   CONF:OUTP <ch>,<v>,<a>,<ON|OFF>
+  CONF:BOTH <v1>,<a1>,<ON|OFF>,<v2>,<a2>,<ON|OFF>  both channels, one round-trip
+  OUTP:BOTH <ON|OFF>,<ON|OFF>                       both outputs, one round-trip
+  OVP:BOTH  <v1>,<v2>                               set OVP both channels
+  OCP:BOTH  <i1>,<i2>                               set OCP both channels
+
+  SETP:BOTH?                         v1_set,i1_set,on1,trk1|v2_set,i2_set,on2,trk2
+  PROT:BOTH?                         ovp1,ocp1|ovp2,ocp2
 
   TRACK ON|OFF                       enable/disable CH2 tracking CH1
   TRACK?                             → 1 (tracking) or 0
@@ -52,6 +59,8 @@ Supported commands
   INFO?                              device info as JSON
 """
 
+__version__ = '1.0.4'
+
 import argparse
 import json
 import os
@@ -61,7 +70,7 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ea_ps2k_driver import EaPs2k, EaProtocolError
+from ea_ps2k_driver import EaPs2k, EaProtocolError, is_scpi_capable
 
 
 class EaBridge:
@@ -77,7 +86,7 @@ class EaBridge:
             raise SystemExit(1)
         try:
             self.ps.connect()
-        except serial.SerialException as exc:
+        except (serial.SerialException, EaProtocolError) as exc:
             print(f'[Bridge] Could not open {self.ps.port_name}: {exc} — will retry', flush=True)
             raise SystemExit(1)
         print(f'[Bridge] Connected to {self.ps.port_name}')
@@ -87,9 +96,25 @@ class EaBridge:
                          f'{info["serial"]},{info["version"]}')
             print(f'[Bridge] {info["type"]}  '
                   f'{info["nom_voltage"]:.0f} V / {info["nom_current"]:.0f} A  '
-                  f'fw {info["version"]}')
+                  f'fw {info["version"]}', flush=True)
+            if is_scpi_capable(info['version']):
+                print(
+                    f'[Bridge] NOTE: Firmware {info["version"]!r} supports native '
+                    f'SCPI (v>=3.06, build year>=2020). This binary bridge still '
+                    f'works, but you can also connect EEZStudio directly to '
+                    f'{self.ps.port_name} via SCPI without the bridge.',
+                    flush=True,
+                )
         except EaProtocolError as exc:
             print(f'[Bridge] Warning: could not read device info: {exc}')
+        # Attempt to disable tracking at startup.
+        # Manual requires both channels OFF first — if outputs are already on
+        # this will be rejected; we ignore the failure and leave tracking as-is.
+        try:
+            self.ps.set_tracking(False)
+            print('[Bridge] Tracking OFF at startup', flush=True)
+        except Exception as exc:
+            print(f'[Bridge] Note: could not disable tracking at startup: {exc}', flush=True)
 
     def disconnect(self):
         self.ps.disconnect()
@@ -155,9 +180,25 @@ class EaBridge:
                 self.ps.set_output(int(a[0]), _on(a[1]))
                 return '0'
 
+            if upper.startswith('OUTP:BOTH '):
+                # Set both channel outputs in one TCP round-trip.
+                # Args: on1,on2
+                a = _args(cmd)
+                self.ps.set_output(1, _on(a[0]))
+                self.ps.set_output(2, _on(a[1]))
+                return '0'
+
             if upper.startswith('CONF:OUTP '):
                 a = _args(cmd)
                 self.ps.configure(int(a[0]), float(a[1]), float(a[2]), _on(a[3]))
+                return '0'
+
+            if upper.startswith('CONF:BOTH '):
+                # Configure both channels in one TCP round-trip.
+                # Args: v1,i1,out1,v2,i2,out2
+                a = _args(cmd)
+                self.ps.configure(1, float(a[0]), float(a[1]), _on(a[2]))
+                self.ps.configure(2, float(a[3]), float(a[4]), _on(a[5]))
                 return '0'
 
             if upper.startswith('CONF '):
@@ -171,9 +212,21 @@ class EaBridge:
                 self.ps.set_ovp(int(a[0]), float(a[1]))
                 return '0'
 
+            if upper.startswith('OVP:BOTH '):
+                a = _args(cmd)
+                self.ps.set_ovp(1, float(a[0]))
+                self.ps.set_ovp(2, float(a[1]))
+                return '0'
+
             if upper.startswith('OCP '):
                 a = _args(cmd)
                 self.ps.set_ocp(int(a[0]), float(a[1]))
+                return '0'
+
+            if upper.startswith('OCP:BOTH '):
+                a = _args(cmd)
+                self.ps.set_ocp(1, float(a[0]))
+                self.ps.set_ocp(2, float(a[1]))
                 return '0'
 
             if upper.startswith('OVP?'):
@@ -181,6 +234,12 @@ class EaBridge:
 
             if upper.startswith('OCP?'):
                 return f'{self.ps.get_ocp(int(_arg(cmd, 0))):.4f}'
+
+            if upper == 'PROT:BOTH?':
+                # OVP and OCP for both channels in one TCP round-trip.
+                # Returns: ovp1,ocp1|ovp2,ocp2
+                return (f'{self.ps.get_ovp(1):.4f},{self.ps.get_ocp(1):.4f}'
+                        f'|{self.ps.get_ovp(2):.4f},{self.ps.get_ocp(2):.4f}')
 
             # ── Measurements ──────────────────────────────────────────────
             if upper.startswith('MEAS:VOLT?'):
@@ -196,6 +255,17 @@ class EaBridge:
                 return (f'{d["v"]:.4f},{d["i"]:.4f},'
                         f'{"1" if d["on"] else "0"},{mode},{trk}')
 
+            if upper == 'MEAS:BOTH?':
+                # Both channels in one TCP round-trip — used by the Live shortcut
+                # to halve the number of EEZ Studio connection.query() calls.
+                d1, d2 = self.ps.get_actual_both()
+                def _fmt(d: dict) -> str:
+                    mode = 'CC' if d['CC'] else 'CV'
+                    trk  = '1' if d['tracking'] else '0'
+                    return (f'{d["v"]:.4f},{d["i"]:.4f},'
+                            f'{"1" if d["on"] else "0"},{mode},{trk}')
+                return f'{_fmt(d1)}|{_fmt(d2)}'
+
             if upper.startswith('STAT?'):
                 d = self.ps.get_actual(int(_arg(cmd, 0)))
                 return json.dumps(
@@ -207,6 +277,15 @@ class EaBridge:
                 trk = '1' if d['tracking'] else '0'
                 return (f'{d["v_set"]:.4f},{d["i_set"]:.4f},'
                         f'{"1" if d["on"] else "0"},{trk}')
+
+            if upper == 'SETP:BOTH?':
+                # Setpoints for both channels in one TCP round-trip.
+                # Returns: v1_set,i1_set,on1,trk1|v2_set,i2_set,on2,trk2
+                def _fmt_setp(d: dict) -> str:
+                    trk = '1' if d['tracking'] else '0'
+                    return (f'{d["v_set"]:.4f},{d["i_set"]:.4f},'
+                            f'{"1" if d["on"] else "0"},{trk}')
+                return f'{_fmt_setp(self.ps.get_setpoints(1))}|{_fmt_setp(self.ps.get_setpoints(2))}'
 
             if upper.startswith('VOLT:SET?'):
                 return f'{self.ps.get_setpoints(int(_arg(cmd, 0)))["v_set"]:.4f}'
@@ -265,9 +344,15 @@ def _on(s: str) -> bool:
 
 def _handle_client(conn: socket.socket, addr: tuple, bridge: EaBridge):
     print(f'[Bridge] Client connected: {addr[0]}:{addr[1]}')
+    # Disable Nagle so responses are flushed immediately (no batching delay).
+    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     buf = ''
     try:
-        conn.settimeout(5.0)
+        # 100 ms timeout: if a command arrives without a trailing \n (some SCPI
+        # clients omit it), we dispatch via the timeout fallback after 100 ms
+        # rather than the old 5 000 ms — which was the main cause of the
+        # 6-second round-trip observed in EEZ Studio.
+        conn.settimeout(0.1)
         while True:
             try:
                 chunk = conn.recv(4096)
@@ -354,7 +439,7 @@ def main():
         help='Bind address  (0.0.0.0 = all interfaces, 127.0.0.1 = local only)')
     args = parser.parse_args()
 
-    print(f'[Bridge] EA-PS2000B TCP bridge')
+    print(f'[Bridge] EA-PS2000B TCP bridge  v{__version__}')
     print(f'[Bridge] Serial port  : {args.serial}')
     print(f'[Bridge] TCP address  : {args.host}:{args.tcp_port}')
     print()

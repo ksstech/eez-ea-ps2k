@@ -1,0 +1,34 @@
+# /etc/systemd/system/ea-ps2k-monitor.service
+#
+# EA-PS2000B health check — oneshot service triggered by ea-ps2k-monitor.timer
+#
+# Runs ea-ps2k-monitor.py once (exits 0=OK, 1=fail).
+# Results logged to syslog under tag 'ea-ps2k-monitor'.
+#
+# View results:
+#   journalctl -t ea-ps2k-monitor -f
+#   journalctl -t ea-ps2k-monitor -n 50 --no-pager
+#
+# Installation:
+#   sudo cp ea-ps2k-monitor.service ea-ps2k-monitor.timer /etc/systemd/system/
+#   sudo cp ea-ps2k-monitor.py /opt/ea-ps2k/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ea-ps2k-monitor.timer
+#   sudo systemctl list-timers ea-ps2k-monitor.timer
+
+[Unit]
+Description=EA-PS2000B Bridge Health Check
+After=network.target ea-ps2k-bridge.service
+
+[Service]
+Type=oneshot
+# User confirmed via audit: whoami = vh on this RPi5
+User=vh
+ExecStart=/usr/bin/python3 /opt/ea-ps2k/ea-ps2k-monitor.py --quiet
+# Exit code 1 = health check failed — logged to syslog, not treated as crash
+SuccessExitStatus=0 1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,6 +1,6 @@
-# EA-PS2342-06B Bridge — Raspberry Pi / Ubuntu LAN Server
+# EA-PS2000B Bridge — Raspberry Pi 5 / Ubuntu LAN Server
 
-Hosts the EA-PS2342-06B TCP bridge on a Raspberry Pi 4 running Ubuntu,
+Hosts the EA-PS2000B TCP bridge on a Raspberry Pi 5 running Ubuntu,
 making the power supply accessible at `192.168.1.6:5025` from any device
 on the LAN (or via a firewall NAT rule from anywhere on the internet).
 
@@ -9,14 +9,14 @@ on the LAN (or via a firewall NAT rule from anywhere on the internet).
 ## Architecture
 
 ```
-EA-PS2342 USB
+EA-PS2000B USB
      │
      ▼
-Raspberry Pi 4  (Ubuntu, /dev/ps2342 — stable symlink, see below)
+Raspberry Pi 5  (Ubuntu, /dev/ea-ps2k-port — stable udev symlink)
      │
-     ├── ea_ps2342.py     ← binary protocol driver
-     ├── ea_bridge.py     ← TCP/SCPI translation layer
-     └── systemd service  ← starts at boot, restarts on crash
+     ├── ea_ps2k_driver.py  ← binary protocol driver
+     ├── ea_ps2k_bridge.py  ← TCP/SCPI translation layer
+     └── systemd service    ← starts at boot, restarts on crash
      │
      ▼  TCP port 5025
 LAN (192.168.1.x)
@@ -27,28 +27,29 @@ LAN (192.168.1.x)
 ```
 
 VirtualHere USB Server runs alongside this bridge but must **exclude** the
-PS2342 from its device list — they cannot share the same USB device.
+PS2000B from its device list — they cannot share the same USB device.
 See [VirtualHere exclusion](#virtualhere-exclusion) below.
 
 ---
 
-## Quick Install (RPi / Ubuntu)
+## Quick Install (RPi5 / Ubuntu)
 
-Copy the four files to the RPi, then run the installer:
+Copy the files to the RPi, then run the installer:
 
 ```bash
 # On the RPi — copy files first (scp, USB stick, or git clone)
-chmod +x install_rpi.sh
-./install_rpi.sh
+chmod +x ea-ps2k-install.sh
+./ea-ps2k-install.sh
 ```
 
 The installer:
 1. Installs Python 3 and `python3-serial` if not present
 2. Adds your user to the `dialout` group (serial port access)
-3. Copies bridge files to `~/ea_ps2342/`
-4. Installs a udev rule creating a stable `/dev/ps2342` symlink, immune to
-   `ttyACMx` renumbering — important if the PS2342 is connected via a USB hub
-5. Installs and enables the `ea_ps2342_bridge` systemd service
+3. Copies bridge files to `/opt/ea-ps2k/`
+4. Installs a udev rule creating a stable `/dev/ea-ps2k-port` symlink and
+   disabling USB autosuspend — both immune to `ttyACMx` renumbering and
+   the "idle period" failure mode
+5. Installs and enables the `ea-ps2k-bridge` systemd service
 6. Starts the service immediately
 
 After installation the bridge starts automatically every boot.
@@ -75,46 +76,56 @@ sudo usermod -aG dialout $USER
 # Log out and back in for the group change to take effect
 ```
 
-### 3. Install the udev rule for stable device naming
+### 3. Install the udev rule for stable device naming + autosuspend disable
 
 Rather than referencing `/dev/ttyACM0` directly — which can change if the
-PS2342 is connected via a USB hub and enumeration order shifts across
+PS2000B is connected via a USB hub and enumeration order shifts across
 reboots or replug events — install a udev rule that creates a stable
-`/dev/ps2342` symlink based on the device's USB VID:PID:
+`/dev/ea-ps2k-port` symlink based on the device's USB VID:PID.
+
+The same rule also disables USB autosuspend, which is the primary cause of
+the "works for a while, fails after 2 days idle" failure: Linux puts the USB
+device into a low-power state that the bridge cannot wake up from.
 
 ```bash
-sudo cp 99-ps2342.rules /etc/udev/rules.d/
+sudo cp 99-ea-ps2k-port.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 
-# Plug in the PS2342 if not already connected, then verify:
-ls -la /dev/ps2342
-# Should show something like: /dev/ps2342 -> ttyACM0  (or ttyACM1, etc.)
+# Plug in the PS2000B if not already connected, then verify:
+ls -la /dev/ea-ps2k-port
+# Should show: /dev/ea-ps2k-port -> ttyACM0  (or ttyACM1, etc.)
+
+# Verify autosuspend is disabled:
+cat /sys/bus/usb/devices/*/power/control
+# The entry for your device should show "on" not "auto"
 ```
 
 If you ever need to confirm the VID:PID of your unit (e.g. after a hardware
 swap):
 ```bash
-lsusb | grep -i "EA Elektro\|PS 2342"
-# Bus 001 Device 062: ID 232e:0018 EA Elektro-Automatik GmbH & Co. KG PS 2342-06B
+lsusb | grep -i "EA Elektro\|232e"
+# Bus 003 Device 016: ID 232e:0018 EA Elektro-Automatik GmbH & Co. KG PS 2342-06B
 ```
 
 ### 4. Copy bridge files
 
 ```bash
-mkdir -p ~/ea_ps2342
-cp ea_ps2342.py ea_bridge.py ~/ea_ps2342/
+sudo mkdir -p /opt/ea-ps2k
+sudo cp ea_ps2k_driver.py ea_ps2k_bridge.py ea-ps2k-bridge.sh /opt/ea-ps2k/
+sudo chown -R $USER:$USER /opt/ea-ps2k
+chmod +x /opt/ea-ps2k/ea-ps2k-bridge.sh
 ```
 
 ### 5. Test manually before enabling the service
 
 ```bash
-bash start_bridge.sh
+bash /opt/ea-ps2k/ea-ps2k-bridge.sh
 ```
 
 Expected output:
 ```
-[Bridge] Connected to /dev/ps2342
+[Bridge] Connected to /dev/ea-ps2k-port
 [Bridge] PS 2342-06B  42 V / 6 A  fw V3.02
 [Bridge] Listening on 0.0.0.0:5025
 ```
@@ -128,13 +139,13 @@ echo "*IDN?" | nc 192.168.1.6 5025
 ### 6. Install the systemd service
 
 ```bash
-sudo cp ea_ps2342_bridge.service /etc/systemd/system/
-# Edit the service file to confirm paths and serial port:
-sudo nano /etc/systemd/system/ea_ps2342_bridge.service
+sudo cp ea-ps2k-bridge.service /etc/systemd/system/
+# Edit the User= line to match your username:
+sudo nano /etc/systemd/system/ea-ps2k-bridge.service
 
 sudo systemctl daemon-reload
-sudo systemctl enable ea_ps2342_bridge   # start at boot
-sudo systemctl start  ea_ps2342_bridge   # start now
+sudo systemctl enable ea-ps2k-bridge   # start at boot
+sudo systemctl start  ea-ps2k-bridge   # start now
 ```
 
 ---
@@ -143,22 +154,22 @@ sudo systemctl start  ea_ps2342_bridge   # start now
 
 ```bash
 # Status
-sudo systemctl status ea_ps2342_bridge
+sudo systemctl status ea-ps2k-bridge
 
 # Live log
-sudo journalctl -u ea_ps2342_bridge -f
+sudo journalctl -u ea-ps2k-bridge -f
 
 # Last 50 log lines
-sudo journalctl -u ea_ps2342_bridge -n 50
+sudo journalctl -u ea-ps2k-bridge -n 50
 
 # Restart (e.g. after config change)
-sudo systemctl restart ea_ps2342_bridge
+sudo systemctl restart ea-ps2k-bridge
 
 # Stop
-sudo systemctl stop ea_ps2342_bridge
+sudo systemctl stop ea-ps2k-bridge
 
 # Disable auto-start at boot
-sudo systemctl disable ea_ps2342_bridge
+sudo systemctl disable ea-ps2k-bridge
 ```
 
 ---
@@ -183,8 +194,8 @@ than assuming.
 ### Find your device's VID:PID
 
 ```bash
-lsusb | grep -i "EA Elektro\|PS 2342"
-# Example: Bus 003 Device 002: ID 232e:0018 EA Elektro-Automatik GmbH & Co. KG PS 2342-06B
+lsusb | grep -i "EA Elektro\|232e"
+# Example: Bus 003 Device 016: ID 232e:0018 EA Elektro-Automatik GmbH & Co. KG PS 2342-06B
 ```
 
 ### Exclude the device
@@ -208,8 +219,8 @@ IgnoredDevices=232e/18
 ```bash
 sudo systemctl start virtualhere
 sudo journalctl -u virtualhere -n 10 --no-pager
-# The PS2342 line should now be absent from the "Found" device list
-sudo systemctl restart ea_ps2342_bridge
+# The PS2000B line should now be absent from the "Found" device list
+sudo systemctl restart ea-ps2k-bridge
 ```
 
 ---
@@ -246,18 +257,15 @@ port 5025 can control the power supply. Consider:
 
 ## Differences from the Local Workstation Version
 
-| | Workstation (Windows) | RPi Server |
+| | Workstation (Windows) | RPi5 Server |
 |---|---|---|
-| Serial port | `COM3` | `/dev/ps2342` (stable udev symlink) |
+| Serial port | `COM3` | `/dev/ea-ps2k-port` (stable udev symlink) |
 | Bind address | `127.0.0.1` (local only) | `0.0.0.0` (all interfaces) |
-| Startup | `start_bridge.bat` (manual) | systemd (automatic at boot) |
+| Startup | `ea-ps2k-bridge.bat` (manual) | systemd (automatic at boot) |
 | Restart on crash | no | yes (5 s delay) |
+| USB autosuspend | N/A | disabled via udev rule |
 | Tracking support | read-only (front panel only) | read-only (front panel only) |
 | Python files | same | same |
-| EEZ IEXT | same zip | same zip |
-
-The Python files (`ea_ps2342.py`, `ea_bridge.py`) are **identical** between
-both deployments — only the startup method and bind address differ.
 
 ---
 
@@ -277,15 +285,9 @@ through the serial protocol** on this hardware:
   does not implement tracking control either — only remote and output bits
 - EA Elektro-Automatik (now part of Tektronix) has confirmed the PS2000B
   series is discontinued with no further firmware updates planned
-- An open-source alternate firmware project exists
-  ([UnifiedEngineering/EA-PS2000B-open-firmware](https://github.com/UnifiedEngineering/EA-PS2000B-open-firmware))
-  but its USB serial implementation is currently a stub (echoes data back to
-  host) and does not yet support remote tracking control either
 
 **What works:** `get_tracking()` / `TRACK?` reads the current tracking state
-from the device status byte — this is read-only and works correctly. The
-Configure dialog detects active tracking and shows a warning before you set
-channel values, since CH2 will mirror CH1 regardless of what you configure.
+from the device status byte — this is read-only and works correctly.
 
 **What doesn't work:** `set_tracking()` / `TRACK ON` raises an error
 immediately rather than sending a telegram the device will reject.
@@ -300,10 +302,10 @@ result without relying on the device's internal tracking mechanism at all.
 
 **Service fails to start — serial port not found**
 ```bash
-sudo journalctl -u ea_ps2342_bridge -n 20
-# Look for: "No such file or directory: '/dev/ps2342'"
-ls -la /dev/ps2342
-# If missing: the PS2342 isn't connected/powered, or the udev rule isn't
+sudo journalctl -u ea-ps2k-bridge -n 20
+# Look for: "Device not found: /dev/ea-ps2k-port"
+ls -la /dev/ea-ps2k-port
+# If missing: the PS2000B isn't connected/powered, or the udev rule isn't
 # installed. Check:
 sudo udevadm control --reload-rules && sudo udevadm trigger
 lsusb | grep -i "232e"   # confirm the device is visible to the kernel at all
@@ -311,11 +313,11 @@ lsusb | grep -i "232e"   # confirm the device is visible to the kernel at all
 
 **Permission denied on serial port**
 ```bash
-sudo journalctl -u ea_ps2342_bridge -n 5
+sudo journalctl -u ea-ps2k-bridge -n 5
 # Look for: "PermissionError: [Errno 13] Permission denied"
 # Fix: confirm user is in dialout group
-groups pi   # replace 'pi' with your username
-# If dialout not listed: sudo usermod -aG dialout pi  then reboot
+groups $USER
+# If dialout not listed: sudo usermod -aG dialout $USER  then reboot
 ```
 
 **`[Errno 5] Input/output error` (EIO) when connecting from EEZ**
@@ -332,46 +334,45 @@ it. Two distinct causes seen in practice, in order of likelihood:
    ```
 
 2. **The device node changed** (e.g. `/dev/ttyACM0` → `/dev/ttyACM1`) because
-   the PS2342 is on a USB hub and enumeration order shifted after a reboot
-   or hub replug. This is exactly what the `/dev/ps2342` udev symlink (see
-   step 3 of Manual Installation) solves — if the bridge service still
-   references a hardcoded `/dev/ttyACMx` path instead of `/dev/ps2342`,
-   update it:
+   the PS2000B is on a USB hub and enumeration order shifted after a reboot
+   or hub replug. The `/dev/ea-ps2k-port` udev symlink solves this — if for
+   any reason the bridge is pointing at a hardcoded ttyACMx path:
    ```bash
-   sudo systemctl cat ea_ps2342_bridge | grep ExecStart
-   # If it shows --serial /dev/ttyACMx, switch it to /dev/ps2342:
-   sudo systemctl edit --full ea_ps2342_bridge
+   sudo systemctl cat ea-ps2k-bridge | grep ExecStart
+   sudo systemctl edit --full ea-ps2k-bridge   # fix it
    sudo systemctl daemon-reload
-   sudo systemctl restart ea_ps2342_bridge
+   sudo systemctl restart ea-ps2k-bridge
    ```
 
-**PS2342 repeatedly connects and disconnects in `dmesg`**
+**PS2000B repeatedly connects and disconnects in `dmesg`**
 ```bash
 dmesg -w | grep -i "232e\|disconnect"
 # Repeated "New USB device found" / "USB disconnect" cycles within seconds
-# point to a hardware issue, not software:
+# point to a hardware issue:
 #   - Reseat the USB cable at both ends, or try a different cable
-#   - If on a hub: confirm the hub has its own power adapter connected
-#     and showing a power LED — without it, ports may brown out under load
-#   - If using a USB isolator: try removing it temporarily to rule it out
-#     as the unstable link (isolators often limit current across the
-#     isolation barrier and can be marginal for sustained connections)
-#   - Try a direct connection to the host, bypassing any hub/isolator,
-#     to confirm whether the PS2342 and host port are themselves fine
+#   - If on a hub: confirm the hub has its own power adapter
+#   - Try a direct connection to bypass any hub/isolator
 ```
 
-**PS2342 shows as VirtualHere device instead of `/dev/ps2342`**
+**PS2000B shows as VirtualHere device instead of `/dev/ea-ps2k-port`**
 ```
 The VH server is claiming the device before cdc_acm binds.
-Add the device to VH's IgnoredDevices list as described in
-VirtualHere Exclusion above — note the correct key is IgnoredDevices,
-not ExcludeDevices, and the format is vid/pid (e.g. 232e/18), not vid:pid.
+Add the device to VH's IgnoredDevices list (see VirtualHere Exclusion above).
+Key is IgnoredDevices (not ExcludeDevices), format is 232e/18 (not 232e:0018).
 ```
 
-**EEZ connects but *IDN? times out**
+**EEZ connects but `*IDN?` times out**
 ```
 The bridge is running but not responding fast enough.
-Check: sudo journalctl -u ea_ps2342_bridge -f
+Check: sudo journalctl -u ea-ps2k-bridge -f
 Common cause: previous crashed session left the serial port in a bad state.
-Fix: sudo systemctl restart ea_ps2342_bridge
+Fix: sudo systemctl restart ea-ps2k-bridge
+```
+
+**Works for a few days then stops responding (idle-period failure)**
+```
+Root cause: Linux USB autosuspend put the device into a low-power state.
+Fix: ensure 99-ea-ps2k-port.rules is installed (see step 3 above).
+Verify: cat /sys/bus/usb/devices/*/power/control — should show "on" not "auto"
+for the EA device.
 ```

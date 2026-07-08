@@ -25,8 +25,8 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-# ── Change User to match your actual username on the RPi (whoami) ────────────
-User=ubuntu
+# User confirmed via audit: whoami = vh on this RPi5
+User=vh
 # /dev/ea-ps2k-port is a stable symlink created by 99-ea-ps2k-port.rules (udev),
 # pointing at whichever /dev/ttyACMx the kernel currently assigns the PS2000B.
 # This keeps working even if the device is on a USB hub and its ACM number

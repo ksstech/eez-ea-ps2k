@@ -1,0 +1,23 @@
+# /etc/systemd/system/ea-ps2k-monitor.timer
+#
+# Runs ea-ps2k-monitor.service every 30 minutes.
+#
+# Also runs 5 minutes after boot — enough time for the bridge service to
+# come up and the USB device to settle.
+#
+# Adjust OnCalendar or OnBootSec to change frequency.
+
+[Unit]
+Description=EA-PS2000B Bridge Health Check Timer
+Requires=ea-ps2k-monitor.service
+
+[Timer]
+# Run 5 minutes after boot, then every 30 minutes
+OnBootSec=5min
+OnCalendar=*:0/30
+Unit=ea-ps2k-monitor.service
+# Re-run any checks missed while the system was suspended
+Persistent=true
+
+[Install]
+WantedBy=timers.target

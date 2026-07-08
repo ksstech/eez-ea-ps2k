@@ -88,6 +88,48 @@ _ERROR_CODES = {
 }
 
 
+# ── Firmware version helpers ──────────────────────────────────────────────────
+
+def parse_fw_version(version_str: str):
+    """
+    Parse an EA-PS2000B firmware version string such as 'V3.02 05.12.12'.
+
+    Returns (version_tuple, build_year) where
+        version_tuple : (major: int, minor: int) — e.g. (3, 2)
+        build_year    : 4-digit int               — e.g. 2012
+    Returns (None, None) if the string cannot be parsed.
+    """
+    import re
+    m = re.match(r'V(\d+)\.(\d+)\s+\d+\.\d+\.(\d+)', version_str.strip())
+    if not m:
+        return None, None
+    major, minor, yy = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    year = 2000 + yy if yy < 100 else yy
+    return (major, minor), year
+
+
+def is_scpi_capable(version_str: str) -> bool:
+    """
+    Return True if the firmware version string indicates a device that may
+    support native SCPI (firmware >= V3.06 AND build year >= 2020).
+
+    Background
+    ----------
+    The EA-PS2000B series used a proprietary binary protocol exclusively
+    until the 2020 TFT-screen hardware refresh.  V3.06 introduced initial
+    SCPI support (with known bugs).  All units with a build date before 2020
+    and/or firmware version < V3.06 are binary-only.
+
+    If this returns True the binary bridge still works correctly — the
+    device accepts both protocols.  The caller may wish to log a notice
+    that a direct SCPI connection is now also an option.
+    """
+    vtuple, year = parse_fw_version(version_str)
+    if vtuple is None or year is None:
+        return False          # unparseable — assume binary-only, safe default
+    return vtuple >= (3, 6) and year >= 2020
+
+
 class EaProtocolError(Exception):
     """Device returned a non-zero error code or a protocol violation occurred."""
 
@@ -107,7 +149,7 @@ class EaPs2k:
         is active raises EaProtocolError with a clear message.
     """
 
-    def __init__(self, port: str = '/dev/ea-ps2k-port', timeout: float = 0.5):
+    def __init__(self, port: str = '/dev/ea-ps2k-port', timeout: float = 0.05):
         """
         Parameters
         ----------
@@ -234,9 +276,27 @@ class EaPs2k:
             if wait > 0:
                 time.sleep(wait)
             self._ser.reset_input_buffer()
-            self._ser.write(frame)
-            self._last_tx = time.monotonic()
-            resp = self._ser.read(32)
+            try:
+                self._ser.write(frame)
+                self._last_tx = time.monotonic()
+                # Read SD byte first (1 byte) to determine frame size, then
+                # read the exact remaining bytes — avoids the full timeout wait.
+                sd_b = self._ser.read(1)
+                if not sd_b:
+                    raise EaProtocolError('No response (timeout)')
+                data_len = (sd_b[0] & 0x0F) + 1
+                rest = self._ser.read(data_len + 4)   # node + obj + data + 2 CS
+                resp = sd_b + rest
+            except OSError as exc:
+                # Serial I/O error (e.g. USB disconnect): attempt port recovery
+                # so subsequent queries can succeed after device reconnects.
+                print(f'[Driver] Serial I/O error: {exc} — closing port for recovery')
+                try:
+                    self._ser.close()
+                except Exception:
+                    pass
+                self._ser = None
+                raise EaProtocolError(f'Serial I/O error: {exc}')
         return self._validate(resp)
 
     # ── Typed accessors ───────────────────────────────────────────────────────
@@ -416,6 +476,16 @@ class EaPs2k:
             'OPP':      bool(s2 & _S2_OPP),
             'OTP':      bool(s2 & _S2_OTP),
         }
+
+    def get_actual_both(self) -> tuple:
+        """
+        Read actual values for both channels in one call.
+
+        Returns (dict_ch1, dict_ch2).  Uses the normal inter-command delay
+        between the two serial frames so the device spec is respected, but
+        saves one TCP round-trip when called via the bridge's MEAS:BOTH? command.
+        """
+        return self.get_actual(1), self.get_actual(2)
 
     def get_setpoints(self, channel: int) -> dict:
         """Read programmed setpoints and status (object 0x48)."""
