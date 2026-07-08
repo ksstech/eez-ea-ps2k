@@ -1,0 +1,23 @@
+# /etc/udev/rules.d/99-ps2342.rules
+#
+# Creates a stable /dev/ps2342 symlink for the EA-PS2342-06B power supply,
+# independent of which /dev/ttyACMx number the kernel assigns it.
+#
+# Why this is needed: when the PS2342 is connected via a USB hub rather
+# than a fixed port directly on the host, its ttyACM number can change
+# across reboots or hub replug events depending on enumeration order of
+# other devices on the same hub. The bridge service should reference
+# /dev/ps2342 rather than a specific ttyACMx node so it keeps working
+# regardless of enumeration order.
+#
+# Installation:
+#   sudo cp 99-ps2342.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#   ls -la /dev/ps2342      # should now exist, symlinked to current ttyACMx
+#
+# Verify the VID:PID match your device if you ever swap hardware:
+#   lsusb | grep -i "EA Elektro\|PS 2342"
+#   # Bus 001 Device 062: ID 232e:0018 EA Elektro-Automatik GmbH & Co. KG PS 2342-06B
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="232e", ATTRS{idProduct}=="0018", SYMLINK+="ps2342"

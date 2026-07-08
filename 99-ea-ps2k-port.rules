@@ -1,0 +1,35 @@
+# /etc/udev/rules.d/99-ea-ps2k-port.rules
+#
+# EA Elektro-Automatik PS 2000B series — USB device: VID 232e PID 0018
+#
+# This file does two things:
+#   1. Disables USB autosuspend for the device so it stays responsive
+#      after the system has been idle for hours or days (the main cause
+#      of the "connects but scripts stop working" failure after idle periods).
+#   2. Creates a stable /dev/ea-ps2k-port symlink based on VID:PID, so the
+#      bridge script always finds the device regardless of which /dev/ttyACMx
+#      number the kernel assigns (ttyACM numbers shift when the device is on
+#      a USB hub and enumeration order changes across reboots or replug events).
+#
+# Installation:
+#   sudo cp 99-ea-ps2k-port.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#   ls -la /dev/ea-ps2k-port      # should now exist → ttyACMx
+#   cat /sys/bus/usb/devices/*/power/control | grep -c on   # verify autosuspend off
+#
+# Verify VID:PID if hardware is ever swapped:
+#   lsusb | grep -i "EA Elektro\|232e"
+#   # Bus 003 Device 016: ID 232e:0018 EA Elektro-Automatik GmbH & Co. KG PS 2342-06B
+#
+# Replaces the old split files:
+#   99-ps2342.rules         (symlink only, wrong name)
+#   99-ea-ps2342-usb.rules  (autosuspend only)
+
+# Rule 1: Disable autosuspend when the USB device is added
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="232e", ATTRS{idProduct}=="0018", \
+    ATTR{power/control}="on"
+
+# Rule 2: Create stable tty symlink /dev/ea-ps2k-port
+SUBSYSTEM=="tty", ATTRS{idVendor}=="232e", ATTRS{idProduct}=="0018", \
+    SYMLINK+="ea-ps2k-port"

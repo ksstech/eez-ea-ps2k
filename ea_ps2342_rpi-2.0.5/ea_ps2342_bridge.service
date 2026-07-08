@@ -1,0 +1,51 @@
+# /etc/systemd/system/ea_ps2342_bridge.service
+#
+# EA-PS2342-06B TCP bridge — systemd service unit
+#
+# Installation:
+#   sudo cp 99-ps2342.rules /etc/udev/rules.d/        # if not already installed
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#   sudo cp ea_ps2342_bridge.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable ea_ps2342_bridge
+#   sudo systemctl start  ea_ps2342_bridge
+#
+# Management:
+#   sudo systemctl status  ea_ps2342_bridge
+#   sudo systemctl restart ea_ps2342_bridge
+#   sudo journalctl -u ea_ps2342_bridge -f      # live log tail
+#   sudo journalctl -u ea_ps2342_bridge -n 50   # last 50 lines
+
+[Unit]
+Description=EA-PS2342-06B TCP/SCPI Bridge
+Documentation=https://github.com/your-repo/ea-ps2342-bridge
+After=network.target udev.service dev-ps2342.device
+Wants=dev-ps2342.device
+# StartLimitIntervalSec and StartLimitBurst belong in [Unit], not [Service]
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=pi
+# ── Change WorkingDirectory if your installation path differs ────────────────
+# /dev/ps2342 is a stable symlink created by 99-ps2342.rules (udev), pointing
+# at whichever /dev/ttyACMx the kernel currently assigns the PS2342. This
+# keeps working even if the device is on a USB hub and its ACM number shifts
+# across reboots or hub replug events. Requires the udev rule to be installed
+# — see install_rpi.sh or 99-ps2342.rules.
+WorkingDirectory=/home/pi/ea_ps2342
+ExecStart=/usr/bin/python3 /home/pi/ea_ps2342/ea_bridge.py \
+    --serial /dev/ps2342 \
+    --host 0.0.0.0 \
+    --tcp-port 5025
+# ─────────────────────────────────────────────────────────────────────────────
+
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

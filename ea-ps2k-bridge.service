@@ -1,0 +1,48 @@
+# /etc/systemd/system/ea-ps2k-bridge.service
+#
+# EA-PS2000B TCP bridge — systemd service unit
+#
+# Installation:
+#   sudo cp 99-ea-ps2k-port.rules /etc/udev/rules.d/   # if not already installed
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#   sudo cp ea-ps2k-bridge.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable ea-ps2k-bridge
+#   sudo systemctl start  ea-ps2k-bridge
+#
+# Management:
+#   sudo systemctl status  ea-ps2k-bridge
+#   sudo systemctl restart ea-ps2k-bridge
+#   sudo journalctl -u ea-ps2k-bridge -f      # live log tail
+#   sudo journalctl -u ea-ps2k-bridge -n 50   # last 50 lines
+
+[Unit]
+Description=EA-PS2000B TCP/SCPI Bridge
+After=network.target udev.service dev-ea\x2dps2k\x2dport.device
+Wants=dev-ea\x2dps2k\x2dport.device
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# ── Change User to match your actual username on the RPi (whoami) ────────────
+User=ubuntu
+# /dev/ea-ps2k-port is a stable symlink created by 99-ea-ps2k-port.rules (udev),
+# pointing at whichever /dev/ttyACMx the kernel currently assigns the PS2000B.
+# This keeps working even if the device is on a USB hub and its ACM number
+# shifts across reboots or hub replug events.
+WorkingDirectory=/opt/ea-ps2k
+ExecStart=/usr/bin/python3 /opt/ea-ps2k/ea_ps2k_bridge.py \
+    --serial /dev/ea-ps2k-port \
+    --host 0.0.0.0 \
+    --tcp-port 5025
+# ─────────────────────────────────────────────────────────────────────────────
+
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

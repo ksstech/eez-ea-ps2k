@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScpiDefinition xmlns="http://www.agilent.com/schemas/SCPIDL/2008"
+  documentVersion="1.0" friendlyName="EA-PS2342-06B Bridge"
+  schemaVersion="1.2"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.agilent.com/schemas/SCPIDL/2008 ScpiDefinitionLanguage.xsd">
+</ScpiDefinition>
