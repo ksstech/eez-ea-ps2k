@@ -59,7 +59,7 @@ Supported commands
   INFO?                              device info as JSON
 """
 
-__version__ = '1.0.4'
+__version__ = '1.0.5'
 
 import argparse
 import json
@@ -69,8 +69,14 @@ import sys
 import threading
 import time
 
+import serial
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ea_ps2k_driver import EaPs2k, EaProtocolError, is_scpi_capable
+
+# Minimum seconds between serial reconnect attempts.
+# Prevents hammering the port while the device is still coming up.
+_RECONNECT_COOLDOWN = 5.0
 
 
 class EaBridge:
@@ -78,9 +84,9 @@ class EaBridge:
         self.ps   = EaPs2k(serial_port)
         self.lock = threading.Lock()
         self._idn = 'EA Elektro-Automatik,PS 2342-06B,000000,V0.00'
+        self._last_reconnect_attempt = 0.0
 
     def connect(self):
-        import os, serial
         if not os.path.exists(self.ps.port_name):
             print(f'[Bridge] Device not found: {self.ps.port_name} — will retry', flush=True)
             raise SystemExit(1)
@@ -116,6 +122,50 @@ class EaBridge:
         except Exception as exc:
             print(f'[Bridge] Note: could not disable tracking at startup: {exc}', flush=True)
 
+    def _reconnect(self) -> bool:
+        """
+        Single reconnect attempt, rate-limited by _RECONNECT_COOLDOWN.
+
+        Called from dispatch() when the serial port is not connected (i.e.
+        self.ps._ser is None after a previous EIO event closed it).
+
+        Non-blocking: returns False immediately if the device isn't visible
+        yet or the cooldown hasn't elapsed — the caller returns an error to
+        the client and the next command will try again.  The Live shortcut's
+        100 ms poll cycle provides natural retry cadence.
+
+        Returns True if the port was successfully reopened.
+        """
+        now = time.monotonic()
+        if now - self._last_reconnect_attempt < _RECONNECT_COOLDOWN:
+            return False   # too soon — let the cooldown elapse
+        self._last_reconnect_attempt = now
+
+        print(f'[Bridge] Serial lost — attempting reconnect to {self.ps.port_name}...',
+              flush=True)
+
+        if not os.path.exists(self.ps.port_name):
+            print(f'[Bridge] Device not found: {self.ps.port_name}', flush=True)
+            return False
+
+        try:
+            self.ps.connect()
+        except (serial.SerialException, EaProtocolError, OSError) as exc:
+            print(f'[Bridge] Reconnect failed: {exc}', flush=True)
+            return False
+
+        # Refresh cached IDN from the (now live) device
+        try:
+            info = self.ps.get_info()
+            self._idn = (f'{info["manufacturer"]},{info["type"]},'
+                         f'{info["serial"]},{info["version"]}')
+            print(f'[Bridge] Reconnected: {info["type"]}  fw {info["version"]}',
+                  flush=True)
+        except EaProtocolError as exc:
+            print(f'[Bridge] Reconnected (could not refresh device info: {exc})',
+                  flush=True)
+        return True
+
     def disconnect(self):
         self.ps.disconnect()
 
@@ -127,8 +177,15 @@ class EaBridge:
 
         try:
             # ── Identification ────────────────────────────────────────────
+            # *IDN? returns the cached value — no serial I/O, always works.
             if upper == '*IDN?':
                 return self._idn
+
+            # All commands below require a live serial connection.
+            # If the port was closed by a previous I/O error, attempt reconnect.
+            if not self.ps.is_connected:
+                if not self._reconnect():
+                    return 'ERR:Device disconnected — reconnecting, retry shortly'
 
             if upper == '*RST':
                 # Disable tracking first so CH2 commands are not blocked
