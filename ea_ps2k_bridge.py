@@ -59,7 +59,7 @@ Supported commands
   INFO?                              device info as JSON
 """
 
-__version__ = '1.0.5'
+__version__ = '1.0.7'
 
 import argparse
 import json
@@ -77,6 +77,11 @@ from ea_ps2k_driver import EaPs2k, EaProtocolError, is_scpi_capable
 # Minimum seconds between serial reconnect attempts.
 # Prevents hammering the port while the device is still coming up.
 _RECONNECT_COOLDOWN = 5.0
+
+# How often the background watchdog checks whether the serial port needs
+# reconnecting.  Covers the idle case (no active client) where dispatch()
+# never runs and the lazy reconnect path would not fire.
+_WATCHDOG_INTERVAL = 20.0
 
 
 class EaBridge:
@@ -121,6 +126,31 @@ class EaBridge:
             print('[Bridge] Tracking OFF at startup', flush=True)
         except Exception as exc:
             print(f'[Bridge] Note: could not disable tracking at startup: {exc}', flush=True)
+
+        # Start background watchdog — reconnects when no client is active
+        t = threading.Thread(target=self._watchdog_loop,
+                             name='EaBridgeWatchdog', daemon=True)
+        t.start()
+        print(f'[Bridge] Watchdog started (interval {_WATCHDOG_INTERVAL:.0f}s)',
+              flush=True)
+
+    def _watchdog_loop(self):
+        """
+        Background daemon thread — started once in connect().
+
+        Wakes every _WATCHDOG_INTERVAL seconds.  If the serial port is lost
+        (is_connected False) it calls _reconnect() under bridge.lock so it
+        cannot race with an active client handler.
+
+        Covers the overnight/idle case where no client is connected and
+        dispatch() never runs, so the lazy reconnect path cannot fire.
+        """
+        while True:
+            time.sleep(_WATCHDOG_INTERVAL)
+            if not self.ps.is_connected:           # cheap check — no lock needed
+                with self.lock:
+                    if not self.ps.is_connected:   # re-check under lock
+                        self._reconnect()
 
     def _reconnect(self) -> bool:
         """

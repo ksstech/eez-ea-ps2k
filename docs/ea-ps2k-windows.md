@@ -27,12 +27,13 @@ For COM ports above COM9:
 python ea_ps2k_bridge.py --serial \\.\COM12
 ```
 
-Expected startup output (bridge v1.0.4+):
+Expected startup output (bridge v1.0.7+):
 ```
-[Bridge] EA-PS2000B TCP bridge  v1.0.4
+[Bridge] EA-PS2000B TCP bridge  v1.0.7
 [Bridge] Connected to COM3
 [Bridge] PS 2342-06B  42 V / 6 A  fw V3.02
 [Bridge] Tracking OFF at startup
+[Bridge] Watchdog started (interval 20s)
 [Bridge] Listening on 127.0.0.1:5025
 ```
 
@@ -47,7 +48,7 @@ Install the extension: Home → Extensions → Install → select `ea-ps2000-ser
 | File | Purpose |
 |------|---------|
 | `ea_ps2k_driver.py` | Binary protocol driver (shared with RPi version) |
-| `ea_ps2k_bridge.py` | TCP bridge server (v1.0.4) |
+| `ea_ps2k_bridge.py` | TCP bridge server (v1.0.7) |
 | `ea-ps2k-bridge.bat` | Double-click launcher |
 | `requirements.txt` | Python dependencies (`pip install pyserial`) |
 | `eezstudio/package.json` | EEZ Studio extension source (v1.0.29) |
