@@ -56,44 +56,15 @@ Install the extension: Home → Extensions → Install → select `ea-ps2000-ser
 
 ## Bridge commands
 
-Single-channel commands (replace `x` with `1` or `2`):
+Full command reference (including the dual-channel `BOTH` commands and the
+non-EEZ-Studio usage examples) is in the
+[main README](../README.md#bridge-command-reference) — canonical location,
+not duplicated here.
 
-```
-*IDN?                         device identification
-INFO?                         device info JSON (nom voltage/current/type/fw)
-VOLT x,12.5                   set CHx voltage
-CURR x,2.0                    set CHx current limit
-OUTP x,ON                     turn CHx output on/off
-CONF:OUTP x,12.0,2.0,ON       configure CHx voltage, current, output in one command
-MEAS:ALL? x                   actual v,i,on,mode,tracking for CHx
-SETP? x                       setpoints readback for CHx
-OVP x,46.0                    set CHx over-voltage protection level
-OCP x,6.5                     set CHx over-current protection level
-TRACK?                        tracking state (read-only — use front panel button)
-LOG:START C:\data\log.csv,0.5 start CSV logging (interval seconds)
-LOG:STOP                      stop logging
-LOG:STATUS?                   1 if logging active, 0 if not
-```
-
-Dual-channel BOTH commands (single TCP round-trip for both channels):
-
-```
-MEAS:BOTH?                    actual readings for both channels
-                              returns: v,i,on,mode,trk|v,i,on,mode,trk
-SETP:BOTH?                    setpoints for both channels
-                              returns: v,i,on,trk|v,i,on,trk
-PROT:BOTH?                    OVP and OCP levels for both channels
-                              returns: ovp,ocp|ovp,ocp
-CONF:BOTH v1,i1,out1,v2,i2,out2   configure both channels in one command
-OUTP:BOTH on1,on2             set output state for both channels  (e.g. ON,OFF)
-OVP:BOTH ovp1,ovp2            set OVP level for both channels
-OCP:BOTH ocp1,ocp2            set OCP level for both channels
-```
-
-Note: `TRACK ON` / `TRACK OFF` are not supported — the PS2000B firmware
-does not allow remote tracking control. Use the front panel Tracking button.
-The bridge attempts `TRACK OFF` at startup (silently ignored if firmware rejects it).
-Current limit (`SETP?`) differs from actual current draw (`MEAS:ALL?`).
+Quick reminders specific to this workstation setup: `TRACK ON`/`TRACK OFF`
+are not supported — the PS2000B firmware rejects remote tracking control,
+use the front panel Tracking button (`TRACK?` read is fine). Current limit
+(`SETP?`) differs from actual current draw (`MEAS:ALL?`).
 
 ## EEZ Studio extension shortcuts (v1.0.29)
 
