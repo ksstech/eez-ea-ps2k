@@ -120,22 +120,9 @@ Current limit (`SETP?`) differs from actual current draw (`MEAS:ALL?`).
 
 ## EEZ Studio toast notifications — multi-line display
 
-EEZ Studio uses react-toastify for in-app notifications. By default,
-`white-space` on `.Toastify__toast-body` is not set to `pre-line`, so
-`\n` characters in toast strings are collapsed to spaces and CH1/CH2
-data appears on a single line.
-
-**Investigation findings:**
-
-| Approach | Result |
-|----------|--------|
-| `\n` in render string, no CSS change | Single line — newline collapsed |
-| `<br>` in render string | Literal text `<br>` — not rendered as HTML |
-| `white-space: pre-line` via DevTools injection | Two lines — works |
-| `document.createElement('style')` from script | Two lines — works (document accessible in sandbox) |
-
-**Workaround (implemented in v1.0.29):** Each shortcut that uses `\n` injects
-the CSS fix into `document.head` on first run of the EEZ Studio session:
+EEZ Studio's toast library doesn't render `\n` as a line break by default, so
+every shortcut here that shows multi-line output (Live, Configure, Output,
+Both On/Off) injects a small CSS fix on first run of the session:
 
 ```javascript
 if (!document.getElementById('ea-ps2k-toast-fix')) {
@@ -146,10 +133,6 @@ if (!document.getElementById('ea-ps2k-toast-fix')) {
 }
 ```
 
-The guard (`getElementById` check) ensures the style tag is only added once
-per session regardless of how many shortcuts are run.
-
-**Upstream fix:** A GitHub issue has been filed against `eez-open/studio`
-requesting `white-space: pre-line` be added to `.Toastify__toast-body` in
-`packages/eez-studio-ui/_stylesheets/app.less`. Once merged the CSS injection
-block in each shortcut becomes a harmless no-op and can be removed.
+Full background (why it's needed, what was tried, upstream issue status) is
+cross-instrument reference material, not specific to this bridge — see
+[eez/docs/eez-live-toast-pattern.md](https://github.com/ksstech/eez/blob/main/docs/eez-live-toast-pattern.md).
