@@ -30,6 +30,16 @@ from datetime import datetime
 
 import serial
 
+# termios.error is raised by reset_input_buffer() / tcflush() on Linux when the
+# underlying fd enters EIO state (e.g. USB hub cascade failure).  It is NOT a
+# subclass of OSError, so it must be caught explicitly.  On Windows/macOS where
+# termios is unavailable we fall back to OSError (harmless duplicate in the tuple).
+try:
+    import termios as _termios
+    _TERMIOS_ERROR: type = _termios.error
+except ImportError:
+    _TERMIOS_ERROR = OSError
+
 
 # ── Protocol constants ────────────────────────────────────────────────────────
 
@@ -275,8 +285,10 @@ class EaPs2k:
             wait = _MIN_DELAY - (time.monotonic() - self._last_tx)
             if wait > 0:
                 time.sleep(wait)
-            self._ser.reset_input_buffer()
             try:
+                # reset_input_buffer() calls termios.tcflush() — must be inside
+                # the try so that termios.error on an EIO fd is caught below.
+                self._ser.reset_input_buffer()
                 self._ser.write(frame)
                 self._last_tx = time.monotonic()
                 # Read SD byte first (1 byte) to determine frame size, then
@@ -287,10 +299,11 @@ class EaPs2k:
                 data_len = (sd_b[0] & 0x0F) + 1
                 rest = self._ser.read(data_len + 4)   # node + obj + data + 2 CS
                 resp = sd_b + rest
-            except OSError as exc:
-                # Serial I/O error (e.g. USB disconnect): attempt port recovery
-                # so subsequent queries can succeed after device reconnects.
-                print(f'[Driver] Serial I/O error: {exc} — closing port for recovery')
+            except (OSError, _TERMIOS_ERROR) as exc:
+                # Serial I/O error (e.g. USB disconnect, termios flush failure):
+                # close port so is_connected → False and _reconnect() fires.
+                print(f'[Driver] Serial I/O error: {exc} — closing port for recovery',
+                      flush=True)
                 try:
                     self._ser.close()
                 except Exception:
