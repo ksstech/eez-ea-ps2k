@@ -1,3 +1,8 @@
+# Built EEZ Studio extension zip — published as a GitHub Release asset instead
+# of being committed (avoids binary bloat in git history on every version bump).
+# Rebuild with make-eez-zip.bat; publish with: gh release create vX.Y.Z <zip>
+ea-ps2000-series-*.zip
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
