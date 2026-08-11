@@ -3,7 +3,7 @@
   "name": "EA PS2000 Series",
   "manufacturer": "Electro Automatik",
   "displayName": "EA-PS2000B Series (Bridge)",
-  "version": "1.0.29",
+  "version": "1.0.30",
   "description": "EA-PS2000B series dual-channel power supply via TCP bridge. Requires ea_ps2k_bridge.py running on localhost:5025.",
   "author": "Community",
   "eez-studio": {
