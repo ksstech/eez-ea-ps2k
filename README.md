@@ -23,6 +23,11 @@ see [Using it without EEZ Studio](#using-it-without-eez-studio) below:
 3. **Python library** — `import ea_ps2k_driver`, talk to the device directly,
    no TCP layer or bridge process at all.
 
+New to this repo and just want the EEZ Studio extension installed? See
+[ksstech/eez: docs/installing-extensions.md](https://github.com/ksstech/eez/blob/main/docs/installing-extensions.md)
+for the download/install steps (and two easy mistakes to avoid — grabbing
+the wrong zip, and Safari auto-unzipping it).
+
 ---
 
 ## Architecture
@@ -71,7 +76,8 @@ Three independent layers, each usable on its own:
 | `ea-ps2k-rpi-deploy.sh` | Fuller RPi deploy script — additionally tears down a previous `ea_ps2342`-named install (old naming, pre-rename) and installs the monitor timer too. |
 | `99-ea-ps2k-port.rules` | udev rule: stable `/dev/ea-ps2k-port` symlink by VID:PID + disables USB autosuspend. See [Reliability & Performance](#reliability--performance). |
 | `ea-ps2k-bridge.service`, `ea-ps2k-monitor.service`, `ea-ps2k-monitor.timer` | systemd units for the bridge and its periodic health check. |
-| `eezstudio/` | EEZ Studio extension source — `package.json` (shortcuts + metadata), `.idf`/`.sdl` (instrument definition), `image.png`. Built into a distributable zip by `make-eez-zip.bat` and published as a [GitHub Release](https://github.com/ksstech/eez-ea-ps2k/releases) (not committed — see `.gitignore`). |
+| `eezstudio/` | EEZ Studio extension source — `package.json` (shortcuts + metadata), `.idf`/`.sdl` (instrument definition), `image.png`. Built into a distributable zip by `build-extension-zip.py` and published as a [GitHub Release](https://github.com/ksstech/eez-ea-ps2k/releases) (not committed — see `.gitignore`). |
+| `build-extension-zip.py` | Builds the `eezstudio/` folder into a release zip. Cross-platform (Python 3, stdlib only) — see [Development](#development). |
 | `docs/ea-ps2k-rpi.md` | Full RPi/Ubuntu server deployment guide — install, VirtualHere exclusion, troubleshooting. |
 | `docs/ea-ps2k-windows.md` | Windows workstation setup + EEZ Studio extension shortcut reference. |
 | `requirements.txt` | `pyserial>=3.5` — the only dependency. |
@@ -266,7 +272,7 @@ things and change on different schedules:
   Versioned by `eezstudio/package.json`'s `version` field. Bump it whenever
   anything under `eezstudio/` changes, rebuild and publish:
   ```bash
-  make-eez-zip.bat
+  python3 build-extension-zip.py
   git tag vX.Y.Z && git push origin vX.Y.Z
   gh release create vX.Y.Z ea-ps2000-series-X.Y.Z.zip --title "vX.Y.Z" --notes "..."
   ```
