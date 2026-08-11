@@ -136,7 +136,10 @@ echo "[8/10] Installing ea-ps2k-bridge.service..."
 sudo cp "$SCRIPT_DIR/ea-ps2k-bridge.service" /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable ea-ps2k-bridge
-sudo systemctl start  ea-ps2k-bridge
+# restart, not start: on a redeploy the service is already running, and
+# `start` on an already-active unit is a no-op — it would leave the old
+# code running under the new files on disk without ever loading them.
+sudo systemctl restart ea-ps2k-bridge
 sleep 2
 STATUS=$(systemctl is-active ea-ps2k-bridge 2>/dev/null || echo "unknown")
 echo "  Service status: $STATUS"
