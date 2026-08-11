@@ -59,7 +59,7 @@ Supported commands
   INFO?                              device info as JSON
 """
 
-__version__ = '1.0.7'
+__version__ = '1.0.8'
 
 import argparse
 import json

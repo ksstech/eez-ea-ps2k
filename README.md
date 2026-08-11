@@ -250,16 +250,30 @@ hardware limitation of the Triple series, not a driver gap.
 
 ## Development
 
-Rebuild the EEZ Studio extension zip after changing anything under
-`eezstudio/`:
-```bash
-make-eez-zip.bat
-```
-Publish a new release (zip is `.gitignore`'d, not committed):
-```bash
-git tag vX.Y.Z && git push origin vX.Y.Z
-gh release create vX.Y.Z ea-ps2000-series-X.Y.Z.zip --title "vX.Y.Z" --notes "..."
-```
+This repo ships two independently-versioned, independently-deployable
+artifacts — don't conflate their version numbers, they track different
+things and change on different schedules:
+
+- **The bridge** (`ea_ps2k_bridge.py`, `ea_ps2k_driver.py`) — runs standalone,
+  no EEZ Studio required (see [Using it without EEZ Studio](#using-it-without-eez-studio)).
+  Versioned by `__version__` in `ea_ps2k_bridge.py`, printed in its startup
+  banner. Bump it whenever `ea_ps2k_bridge.py` or `ea_ps2k_driver.py` changes,
+  tag `bridge-vX.Y.Z`:
+  ```bash
+  git tag bridge-vX.Y.Z && git push origin bridge-vX.Y.Z
+  ```
+- **The EEZ Studio extension** (`eezstudio/`) — a thin client of the bridge.
+  Versioned by `eezstudio/package.json`'s `version` field. Bump it whenever
+  anything under `eezstudio/` changes, rebuild and publish:
+  ```bash
+  make-eez-zip.bat
+  git tag vX.Y.Z && git push origin vX.Y.Z
+  gh release create vX.Y.Z ea-ps2000-series-X.Y.Z.zip --title "vX.Y.Z" --notes "..."
+  ```
+
+A commit touching only one side only needs that side's version bumped and
+tag cut — e.g. a bridge-only reliability fix doesn't need a new extension
+release, and vice versa.
 
 ## License
 
