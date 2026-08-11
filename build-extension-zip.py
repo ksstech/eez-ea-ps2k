@@ -63,7 +63,7 @@ def main() -> None:
     print(f"Created: {out_path}")
     print(f"  {len(files)} file(s): {', '.join(f.name for f in files)}")
     print()
-    print("In EEZ Studio: Extensions Manager -> Install -> Install from file...")
+    print("In EEZ Studio: Extensions Manager -> ☰ menu -> Install Extension")
 
 
 if __name__ == "__main__":
