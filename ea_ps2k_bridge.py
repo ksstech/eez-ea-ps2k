@@ -59,7 +59,7 @@ Supported commands
   INFO?                              device info as JSON
 """
 
-__version__ = '1.0.8'
+__version__ = '1.0.9'
 
 import argparse
 import json
@@ -215,7 +215,7 @@ class EaBridge:
             # If the port was closed by a previous I/O error, attempt reconnect.
             if not self.ps.is_connected:
                 if not self._reconnect():
-                    return 'ERR:Device disconnected — reconnecting, retry shortly'
+                    return 'ERR:Device disconnected - reconnecting, retry shortly'
 
             if upper == '*RST':
                 # Disable tracking first so CH2 commands are not blocked
@@ -409,7 +409,7 @@ class EaBridge:
         except EaProtocolError as exc:
             return f'ERR:{exc}'
         except (IndexError, ValueError) as exc:
-            return f'ERR:Bad arguments — {exc}'
+            return f'ERR:Bad arguments - {exc}'
         except Exception as exc:
             return f'ERR:{type(exc).__name__}: {exc}'
 
@@ -430,7 +430,11 @@ def _on(s: str) -> bool:
 # ── TCP server ────────────────────────────────────────────────────────────────
 
 def _handle_client(conn: socket.socket, addr: tuple, bridge: EaBridge):
-    print(f'[Bridge] Client connected: {addr[0]}:{addr[1]}')
+    # flush=True on all three prints in this function: under systemd stdout is a
+    # pipe, so it is block-buffered and these lines surfaced in journalctl late,
+    # in batches, stamped with the flush time rather than the event time. Client
+    # errors were effectively invisible.
+    print(f'[Bridge] Client connected: {addr[0]}:{addr[1]}', flush=True)
     # Disable Nagle so responses are flushed immediately (no batching delay).
     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     buf = ''
@@ -449,8 +453,14 @@ def _handle_client(conn: socket.socket, addr: tuple, bridge: EaBridge):
                         resp = bridge.dispatch(buf.strip())
                     buf = ''
                     if resp:
+                        # errors='replace', not strict: a stray non-ASCII
+                        # character in a message must not cost the client its
+                        # response line. Strict encoding raised
+                        # UnicodeEncodeError, which is a ValueError and so
+                        # escaped the OSError guard below, killing the handler
+                        # and closing the socket with nothing sent.
                         try:
-                            conn.sendall((resp + '\n').encode('ascii'))
+                            conn.sendall((resp + '\n').encode('ascii', errors='replace'))
                         except OSError:
                             break
                 continue
@@ -465,17 +475,17 @@ def _handle_client(conn: socket.socket, addr: tuple, bridge: EaBridge):
                         resp = bridge.dispatch(line)
                     if resp:
                         try:
-                            conn.sendall((resp + '\n').encode('ascii'))
+                            conn.sendall((resp + '\n').encode('ascii', errors='replace'))
                         except OSError:
                             return
     except Exception as exc:
-        print(f'[Bridge] Client {addr} error: {exc}')
+        print(f'[Bridge] Client {addr} error: {exc}', flush=True)
     finally:
         try:
             conn.close()
         except OSError:
             pass
-        print(f'[Bridge] Client disconnected: {addr[0]}:{addr[1]}')
+        print(f'[Bridge] Client disconnected: {addr[0]}:{addr[1]}', flush=True)
 
 
 def run_server(bridge: EaBridge, host: str, port: int):
